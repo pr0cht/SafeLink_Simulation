@@ -13,31 +13,29 @@ import java.nio.channels.FileChannel
 
 class MainActivity : AppCompatActivity() {
 
-    // UI Variables
+    // UI
     private lateinit var chatRecyclerView: RecyclerView
     private lateinit var chatAdapter: ChatAdapter
     private val messageList = mutableListOf<ChatMessage>()
 
-    // AI Variables
+    // AI
     private lateinit var tflite: Interpreter
     private lateinit var tokenizer: DistilBertTokenizer
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // 1. THESE MUST GO FIRST! Load the screen layout.
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // 2. Setup the RecyclerView (The Chat History)
+        // ??????????????? might retry
         chatRecyclerView = findViewById(R.id.chatRecyclerView)
         chatAdapter = ChatAdapter(messageList)
         chatRecyclerView.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
         chatRecyclerView.adapter = chatAdapter
 
-        // 3. Link the Input Box and Send Button
         val btnSend = findViewById<Button>(R.id.btnSend)
         val inputMessage = findViewById<EditText>(R.id.inputMessage)
 
-        // 4. Initialize AI Model and Tokenizer
+        // Initialize AI Model and Tokenizer
         try {
             val options = Interpreter.Options().apply {
                 numThreads = 4 // Hardware acceleration
@@ -45,8 +43,7 @@ class MainActivity : AppCompatActivity() {
             tflite = Interpreter(loadModelFile(), options)
             tokenizer = DistilBertTokenizer(this)
 
-            // --- THE COLD START FIX ---
-            // Run a silent dummy inference. We pass -1 so it knows NOT to update the UI!
+            //
             runInference("warmup", -1)
 
         } catch (e: Exception) {
@@ -55,7 +52,7 @@ class MainActivity : AppCompatActivity() {
             e.printStackTrace()
         }
 
-        // 5. The Send Button Logic
+        // The Send Button Logic
         btnSend.setOnClickListener {
             val text = inputMessage.text.toString()
             if (text.isNotEmpty()) {
@@ -79,13 +76,12 @@ class MainActivity : AppCompatActivity() {
 
     // Notice we added 'position: Int' to the parameters!
     private fun runInference(text: String, position: Int) {
-        // --- CRASH PREVENTION CHECK ---
         if (!::tflite.isInitialized || !::tokenizer.isInitialized) {
             Toast.makeText(this, "AI is not loaded yet!", Toast.LENGTH_SHORT).show()
             return
         }
 
-        // --- A. Real Pre-Processing ---
+        //
         var cleanText = text.lowercase()
 
         val zeroWidthRegex = Regex("[\u200B-\u200D\uFEFF]")
@@ -104,6 +100,9 @@ class MainActivity : AppCompatActivity() {
             cleanText = cleanText.replace(homoglyph, standard)
         }
 
+        val digitRegex = Regex("\\b\\d{4,}\\b")
+        cleanText = cleanText.replace(digitRegex, "0000")
+
         val hasUrl = if (text.contains("http")) 1f else 0f
         val lenUrl = text.split(" ").count { it.contains("http") }.toFloat()
 
@@ -118,13 +117,15 @@ class MainActivity : AppCompatActivity() {
         val outputBuffer = Array(1) { FloatArray(1) }
         val outputs = mapOf(0 to outputBuffer)
 
-        // --- C. Inference with Latency Timer ---
-        val startTime = System.currentTimeMillis() // Start the stopwatch
+        //
+        val startTimeNano = System.nanoTime()
 
         tflite.runForMultipleInputsOutputs(arrayOf(maskBatch, urlBatch, inputIdsBatch), outputs)
 
-        val endTime = System.currentTimeMillis() // Stop the stopwatch
-        val inferenceLatencyMs = endTime - startTime // Calculate the difference!
+        val endTimeNano = System.nanoTime()
+
+        // Convert nanoseconds back to milliseconds so it reads nicely on the UI
+        val inferenceLatencyMs = (endTimeNano - startTimeNano) / 1_000_000
 
         val probability = outputBuffer[0][0]
         val isPhishing = probability > 0.5
